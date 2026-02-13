@@ -1,12 +1,13 @@
 """
 🎬 КИНЕМАТОГРАФИЧНЫЙ РОМАНТИЧЕСКИЙ БОТ
-Версия для облачного хостинга (Render.com)
+Версия для Render.com с заглушкой порта
 Работает 24/7 без твоего компьютера!
 """
 
 import asyncio
 import random
-import os  # ⚠️ ВАЖНО: для чтения токена из переменных окружения
+import os
+import threading
 from datetime import datetime, date
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
@@ -14,18 +15,49 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, FSInputFile
+from aiohttp import web
 
 # ============================================================================
-# ⚙️ НАСТРОЙКИ
+# ЗАГЛУШКА ДЛЯ RENDER (чтобы открыть порт)
 # ============================================================================
 
-# 🔑 Токен теперь берётся из переменных окружения (для безопасности)
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8295640025:AAFnlqLYIAcJBVzZwNM7QMnbWLl7OU498QU")
+async def handle(request):
+    return web.Response(text="Бот для Муси работает!")
 
-# 🔐 Пароль
-PASSWORD = "14.09.2002"
+async def run_web_server():
+    app = web.Application()
+    app.router.add_get('/', handle)
+    app.router.add_get('/health', handle)
+    
+    port = int(os.environ.get('PORT', 10000))
+    print(f"🌐 Заглушка запущена на порту {port}")
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
 
-# 💌 Письмо
+def start_web_server():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(run_web_server())
+    loop.run_forever()
+
+# Запускаем веб-сервер в отдельном потоке
+web_thread = threading.Thread(target=start_web_server, daemon=True)
+web_thread.start()
+
+# ============================================================================
+# ⚙️ НАСТРОЙКИ - ТОЛЬКО ЭТО МЕНЯТЬ!
+# ============================================================================
+
+# 🔑 Токен бота (от @BotFather)
+BOT_TOKEN = "8295640025:AAFnlqLYIAcJBVzZwNM7QMnbWLl7OU498QU"  # ТВОЙ ТОКЕН
+
+# 🔐 ПАРОЛЬ - кто его знает, тот заходит
+PASSWORD = "14.09.2002"  # МОЖНО ИЗМЕНИТЬ
+
+# 💌 Текст письма
 LETTER_TEXT = """
 Письмо моей будущей жене.
 
@@ -65,10 +97,10 @@ LETTER_TEXT = """
 ведь за тебя я молюсь точно также...
 """
 
-# 📅 Наша дата
-START_DATE = date(2025, 10, 18)
+# 📅 Наша дата (день, когда вы стали парой)
+START_DATE = date(2025, 10, 18)  # ИЗМЕНИ ПРИ НЕОБХОДИМОСТИ
 
-# 📍 Координаты Galata Kulesi
+# 📍 Координаты Galata Kulesi (Стамбул)
 GALATA_LATITUDE = 41.0256
 GALATA_LONGITUDE = 28.9742
 
@@ -80,19 +112,28 @@ LOCATION_TEXT = """
 """
 
 # ============================================================================
-# РОМАНТИЧЕСКИЕ СООБЩЕНИЯ
+# РОМАНТИЧЕСКИЕ СООБЩЕНИЯ (для кнопки "🌙 Если скучаешь")
 # ============================================================================
 
 LONGING_MESSAGES = [
     "Сегодня ветер. И я подумал, что если бы ты была рядом, мы бы пили чай и смотрели, как качаются шторы.",
+    
     "Я поймал себя на том, что улыбаюсь в пустоту. Просто вспомнил, как ты смеёшься.",
+    
     "Знаешь, расстояние — это странная вещь. Оно ничего не уменьшает. Наоборот — увеличивает.",
+    
     "Иногда я специально не пишу первым. Чтобы ты написала. И каждый раз, когда вижу уведомление, мне 17.",
+    
     "Здесь сейчас закат. И я в тысячный раз думаю: хорошо бы ты это видела.",
+    
     "Я заметил: когда скучаю, начинаю говорить с тобой вслух. Потом вспоминаю, что тебя нет рядом. Потом снова говорю.",
+    
     "Мне не нужен тайм-менеджмент. Мне нужен тайм-с-тобой-менеджмент.",
+    
     "Ты не представляешь, как много места ты занимаешь в моей голове. И я не хочу освобождать его.",
+    
     "Я перечитываю наши старые переписки. Ты тогда написала 'спокойной ночи', а я не ответил. Прости меня за этого идиота.",
+    
     "Сегодня мне приснилось, что ты рядом. Проснулся и долго не мог понять, почему ты не спишь рядом."
 ]
 
@@ -113,10 +154,11 @@ failed_attempts = {}
 blocked_until = {}
 
 # ============================================================================
-# КЛАВИАТУРА
+# КЛАВИАТУРА - ТОЛЬКО 4 КНОПКИ
 # ============================================================================
 
 def get_main_menu_keyboard():
+    """Главное меню - всегда доступно"""
     buttons = [
         [InlineKeyboardButton(text="✉️ Письмо", callback_data="letter")],
         [InlineKeyboardButton(text="📍 Galata Kulesi", callback_data="location")],
@@ -130,11 +172,13 @@ def get_main_menu_keyboard():
 # ============================================================================
 
 async def send_with_pause(message: types.Message, text: str, pause: float = 0.7):
+    """Отправляет сообщение с эффектом печатания"""
     await bot.send_chat_action(message.chat.id, action="typing")
     await asyncio.sleep(pause)
     await message.answer(text)
 
 async def send_long_text(message: types.Message, text: str):
+    """Разбивает длинный текст на части"""
     parts = text.strip().split('\n\n')
     for i, part in enumerate(parts):
         await bot.send_chat_action(message.chat.id, action="typing")
@@ -163,7 +207,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     if user_id in authorized_users:
         await send_with_pause(message, "🍃 С возвращением...")
         await asyncio.sleep(0.8)
-        await message.answer("Выбери:", reply_markup=get_main_menu_keyboard())
+        await message.answer("Выбери, что хочешь:", reply_markup=get_main_menu_keyboard())
         return
     
     # Запрос пароля
@@ -181,11 +225,14 @@ async def process_password(message: types.Message, state: FSMContext):
     if user_id not in failed_attempts:
         failed_attempts[user_id] = 0
     
+    # ПРОВЕРКА ПАРОЛЯ
     if message.text == PASSWORD:
+        # Успешный вход
         authorized_users.add(user_id)
         failed_attempts[user_id] = 0
         await state.clear()
         
+        # Кинематографичный вход
         await bot.send_chat_action(message.chat.id, action="typing")
         await asyncio.sleep(1.2)
         
@@ -195,13 +242,15 @@ async def process_password(message: types.Message, state: FSMContext):
         await asyncio.sleep(0.8)
         await message.answer("Здесь нет расстояния.\n\n───────")
         await asyncio.sleep(0.8)
-        await message.answer("Выбери:", reply_markup=get_main_menu_keyboard())
+        await message.answer("Выбери, что хочешь:", reply_markup=get_main_menu_keyboard())
         
     else:
+        # Неверный пароль
         failed_attempts[user_id] += 1
         remaining = 3 - failed_attempts[user_id]
         
         if failed_attempts[user_id] >= 3:
+            # Блокировка на 5 минут
             block_time = datetime.now().timestamp() + 300
             blocked_until[user_id] = block_time
             await state.clear()
@@ -225,7 +274,7 @@ async def process_letter(callback: types.CallbackQuery):
     await send_long_text(callback.message, LETTER_TEXT)
 
 # ============================================================================
-# КНОПКА: 📍 GALATA KULESI
+# КНОПКА: 📍 GALATA KULESI (с фото и гео)
 # ============================================================================
 
 @dp.callback_query(F.data == "location")
@@ -238,21 +287,29 @@ async def process_location(callback: types.CallbackQuery):
     
     await callback.answer()
     
+    # Отправляем фото Galata Kulesi
     try:
+        # Попробуем найти фото в интернете (ссылка на общедоступное фото)
         photo_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9c/Galata_Tower_%28Galata_Kulesi%29%2C_Istanbul_%2836788128494%29.jpg/800px-Galata_Tower_%28Galata_Kulesi%29%2C_Istanbul_%2836788128494%29.jpg"
         await callback.message.answer_photo(
             photo=photo_url,
             caption="🏰 Galata Kulesi"
         )
     except:
+        # Если фото не загрузится, отправим только текст
         await callback.message.answer("🏰 Galata Kulesi")
     
     await asyncio.sleep(0.5)
+    
+    # Отправляем геолокацию
     await callback.message.answer_location(
         latitude=GALATA_LATITUDE,
         longitude=GALATA_LONGITUDE
     )
+    
     await asyncio.sleep(0.5)
+    
+    # Отправляем текст легенды
     await send_long_text(callback.message, LOCATION_TEXT)
 
 # ============================================================================
@@ -289,6 +346,7 @@ async def process_our_day(callback: types.CallbackQuery):
     days_passed = (today - START_DATE).days
     
     if days_passed >= 0:
+        # Красивое оформление счетчика
         years = days_passed // 365
         months = (days_passed % 365) // 30
         days = (days_passed % 365) % 30
@@ -325,6 +383,7 @@ async def process_text_messages(message: types.Message):
     if user_id not in authorized_users:
         return
     
+    # 🗝 ПАСХАЛКА - наша дата
     if message.text.strip() == "14.09.2002":
         await bot.send_chat_action(message.chat.id, action="typing")
         await asyncio.sleep(1.2)
@@ -335,6 +394,7 @@ async def process_text_messages(message: types.Message):
         await message.answer("И я бы написал тебе снова.")
         return
     
+    # Ответ на всё остальное
     await bot.send_chat_action(message.chat.id, action="typing")
     await asyncio.sleep(0.5)
     await message.answer("🍃 Я здесь. Просто пиши.")
@@ -346,9 +406,17 @@ async def process_text_messages(message: types.Message):
 async def main():
     print("🎬 БОТ ЗАПУЩЕН В ОБЛАКЕ")
     print("━━━━━━━━━━━━━━━━━━━━━━━")
-    print("✅ Бот будет работать 24/7")
-    print("✅ Компьютер можно выключить")
+    print("🔐 Пароль:", PASSWORD)
+    print("📅 Дата начала:", START_DATE)
     print("━━━━━━━━━━━━━━━━━━━━━━━")
+    print("✅ Кнопки:")
+    print("   ✉️ Письмо")
+    print("   📍 Galata Kulesi")
+    print("   🌙 Если скучаешь")
+    print("   💫 Счетчик отношений")
+    print("━━━━━━━━━━━━━━━━━━━━━━━")
+    print("✅ Бот работает! Меню всегда на месте")
+    print("🌐 Заглушка порта активна - Render доволен")
     
     await dp.start_polling(bot)
 
